@@ -1,7 +1,7 @@
 name: AutoCoder Workflow
 on:
   issues:
-    types: [opened, labeled]
+    types: [opened, reopened, labeled]
 
 jobs:
   generate_code:
@@ -27,6 +27,7 @@ jobs:
         with:
           name: autocoder-artifact
           path: autocoder-bot/
+          if-no-files-found: warn
 
       - name: Download Artifact
         uses: actions/download-artifact@v4
