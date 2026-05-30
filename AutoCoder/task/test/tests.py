@@ -1,11 +1,9 @@
-import os
-
 import yaml
-from github import Github
-from github import GithubException
-from hstest import StageTest, CheckResult, dynamic_test, WrongAnswer
-
+from hstest import StageTest, CheckResult, dynamic_test
+from github import Github, GithubException
 from AutoCoder.task.main import url
+
+import os
 
 
 class GitTest(StageTest):
@@ -15,7 +13,6 @@ class GitTest(StageTest):
     username = url.split('/')[-2]
     full_repo_name = f"{username}/{repo_name}"
     repo = g.get_repo(full_repo_name)
-
 
     @dynamic_test()
     def check_repo(self):
@@ -33,91 +30,36 @@ class GitTest(StageTest):
             return CheckResult.wrong(f"Something went wrong. Encountered: {e}")
 
     @dynamic_test
-    def check_main_file_exists(self):
+    def check_issues_exist(self):
         try:
-            contents = self.repo.get_contents(".github/workflows")
-            main_yaml_file_exists = any(
-                content.path == ".github/workflows/main.yml" or content.path == ".github/workflows/main.yaml" for
-                content in contents)
-            if not main_yaml_file_exists:
-                return CheckResult.wrong(f"The main.yml file does not exist in the .github/workflows/ directory.")
+            issues = list(self.repo.get_issues(state="open"))
+            if not issues:
+                return CheckResult.wrong("No open issues found in the repository.")
             return CheckResult.correct()
         except GithubException as e:
-            if e.status == 404:
-                return CheckResult.wrong("The .github/workflows directory does not exist or cannot be accessed.")
-            else:
-                return CheckResult.wrong(
-                    f"An error occurred while accessing the GitHub repository: {e.data.get('message', 'No error message')}")
+            return CheckResult.wrong(f"An error occurred while accessing the repository: {e.data.get('message', 'No error message')}")
         except Exception as e:
-            return CheckResult.wrong(f"Something went wrong. Encountered: {e}")
+            return CheckResult.wrong(f"An unexpected error occurred: {e}")
 
     @dynamic_test
-    def check_workflow_manifest(self):
+    def check_issue_properties(self):
         try:
-            contents = self.repo.get_contents(".github/workflows/main.yml")
-            workflow_file = contents.decoded_content.decode()
-            new_workflow = yaml.load(workflow_file, Loader=yaml.BaseLoader)
+            issues = list(self.repo.get_issues(state="open"))
+            autocoder_issues = [issue for issue in issues if "autocoder-bot" in [label.name for label in issue.labels] and issue.pull_request is None]
 
-            if not new_workflow:
-                return CheckResult.wrong("The workflow file is empty.")
+            if not autocoder_issues:
+                return CheckResult.wrong("No issues with the 'autocoder-bot' label found.")
 
-            if "on" not in new_workflow or "push" not in new_workflow["on"]:
-                return CheckResult.wrong("The workflow does not run on push.")
-            #  check the main branch
-            if "branches" in new_workflow["on"]:
-                if "main" not in new_workflow["on"]["branches"]:
-                    return CheckResult.wrong("The workflow does not run when new changes are pushed to the main branch.")
-
-            jobs = new_workflow.get("jobs")
-            if not jobs:
-                return CheckResult.wrong("The workflow does not have a job.")
-
-            job_name, job = next(iter(jobs.items()), (None, None))
-
-            if not job or job.get("runs-on") != "ubuntu-latest":
-                return CheckResult.wrong("The job does not run on 'ubuntu-latest' runner or is missing.")
-
-            steps = job.get("steps", [])
-
-            expected_steps = {
-                "checkout_the_repository": "actions/checkout@v",
-                "print_hello_world_using_the_echo_command": "echo"
-            }
-
-            for step_name, expected_value in expected_steps.items():
-                if not any(step.get("run", "").startswith(expected_value) or step.get("uses", "").startswith(expected_value) for step in steps):
-                    return CheckResult.wrong(f"The job does not have a step to {step_name.replace('_', ' ')}.")
-
+            for issue in autocoder_issues:
+                if not issue.body:
+                    return CheckResult.wrong(f"The issue #{issue.number} does not have any content.")
+                if len(issue.body.split()) < 50:
+                    return CheckResult.wrong(f"The issue #{issue.number} is too short. Make sure it is at least 50 words.")
             return CheckResult.correct()
         except GithubException as e:
-            if e.status == 404:
-                return CheckResult.wrong("The .github/workflows directory does not exist or cannot be accessed.")
-            elif e.status == 403:
-                return CheckResult.wrong("Rate limit exceeded. Please try again later or set the GITHUB_TOKEN environment variable.")
-            else:
-                return CheckResult.wrong(
-                    f"An error occurred while accessing the GitHub repository: {e.data.get('message', 'No error message')}")
+            return CheckResult.wrong(f"An error occurred while accessing the repository: {e.data.get('message', 'No error message')}")
         except Exception as e:
-            return CheckResult.wrong(f"Something went wrong. Encountered: {e}")
-
-    @dynamic_test
-    def check_workflow_run_on_push(self):
-        try:
-            latest_workflow_run = list(self.repo.get_workflow_runs().get_page(0))[0]
-            if latest_workflow_run.event != "push":
-                return CheckResult.wrong(f"The latest workflow run was not triggered by a push event.")
-            if latest_workflow_run.conclusion != "success":
-                return CheckResult.wrong(f"The latest workflow run did not succeed.")
-            return CheckResult.correct()
-
-        except GithubException as e:
-            if e.status == 404:
-                return CheckResult.wrong("No workflow runs found or the workflows cannot be accessed.")
-            else:
-                return CheckResult.wrong(
-                    f"An error occurred while accessing the GitHub repository: {e.data.get('message', 'No error message')}")
-        except Exception as e:
-            return CheckResult.wrong(f"Something went wrong. Encountered: {e}")
+            return CheckResult.wrong(f"An unexpected error occurred: {e}")
 
 
 if __name__ == '__main__':
