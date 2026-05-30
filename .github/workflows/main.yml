@@ -48,6 +48,7 @@ jobs:
           git config user.email "actions@github.com"
 
       - name: Create Pull Request
+        continue-on-error: true
         uses: peter-evans/create-pull-request@v5
         with:
           branch: autocoder-branch-${{ github.event.issue.number }}
