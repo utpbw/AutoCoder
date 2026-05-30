@@ -1,82 +1,123 @@
 import os
 
-from AutoCoder.task.main import url
+import yaml
 from github import Github
 from github import GithubException
-from hstest import StageTest, CheckResult, dynamic_test
+from hstest import StageTest, CheckResult, dynamic_test, WrongAnswer
+
+from AutoCoder.task.main import url
 
 
 class GitTest(StageTest):
     g = Github(os.getenv("GITHUB_TOKEN")) if os.getenv("GITHUB_TOKEN") else Github()
 
-    @dynamic_test
-    def check_url_set(self):
-        if url == "":
-            return CheckResult.wrong("The URL in main.py is not set.")
-        if isinstance(url, int):
-            return CheckResult.wrong("The URL in main.py is not set.")
-        if not url.startswith("https://github.com/"):
-            return CheckResult.wrong("The URL in main.py is not a valid GitHub repository URL.")
-        return CheckResult.correct()
+    repo_name = url.split('/')[-1].replace('.git', '')
+    username = url.split('/')[-2]
+    full_repo_name = f"{username}/{repo_name}"
+    repo = g.get_repo(full_repo_name)
+
 
     @dynamic_test()
     def check_repo(self):
-        repo_name = url.split('/')[-1].replace('.git', '')  # Remove .git if present
-        username = url.split('/')[-2]
-        full_repo_name = f"{username}/{repo_name}"
-
         try:
-            # Call get_repo once and store the result
-            repo = self.g.get_repo(full_repo_name)
-
-            # Check if the repository is public
-            if repo.private:
+            if self.repo.private:
                 return CheckResult.wrong("The repository is private. Make sure it's public.")
+            return CheckResult.correct()
+        except GithubException as e:
+            if e.status == 404:
+                return CheckResult.wrong("The repository does not exist or cannot be accessed.")
+            else:
+                return CheckResult.wrong(
+                    f"An error occurred while accessing the GitHub repository: {e.data.get('message', 'No error message')}")
+        except Exception as e:
+            return CheckResult.wrong(f"Something went wrong. Encountered: {e}")
 
-            # List of expected files and directories
-            expected_files = {"README.md", ".github/workflows/main.yml", "scripts/script.sh"}
+    @dynamic_test
+    def check_main_file_exists(self):
+        try:
+            contents = self.repo.get_contents(".github/workflows")
+            main_yaml_file_exists = any(
+                content.path == ".github/workflows/main.yml" or content.path == ".github/workflows/main.yaml" for
+                content in contents)
+            if not main_yaml_file_exists:
+                return CheckResult.wrong(f"The main.yml file does not exist in the .github/workflows/ directory.")
+            return CheckResult.correct()
+        except GithubException as e:
+            if e.status == 404:
+                return CheckResult.wrong("The .github/workflows directory does not exist or cannot be accessed.")
+            else:
+                return CheckResult.wrong(
+                    f"An error occurred while accessing the GitHub repository: {e.data.get('message', 'No error message')}")
+        except Exception as e:
+            return CheckResult.wrong(f"Something went wrong. Encountered: {e}")
 
-            # Use a set to track all top-level paths in the repository
-            repo_contents = set()
+    @dynamic_test
+    def check_workflow_manifest(self):
+        try:
+            contents = self.repo.get_contents(".github/workflows/main.yml")
+            workflow_file = contents.decoded_content.decode()
+            new_workflow = yaml.load(workflow_file, Loader=yaml.BaseLoader)
 
-            # Recursively check all files and directories in the repository
-            def check_directory_contents(contents_url, path=""):
-                contents = repo.get_contents(path)
-                for content in contents:
-                    if content.type == "dir":
-                        check_directory_contents(contents_url, content.path)
-                    else:
-                        repo_contents.add(content.path)
+            if not new_workflow:
+                return CheckResult.wrong("The workflow file is empty.")
 
-            check_directory_contents(repo.get_contents(""))
+            if "on" not in new_workflow or "push" not in new_workflow["on"]:
+                return CheckResult.wrong("The workflow does not run on push.")
+            #  check the main branch
+            if "branches" in new_workflow["on"]:
+                if "main" not in new_workflow["on"]["branches"]:
+                    return CheckResult.wrong("The workflow does not run when new changes are pushed to the main branch.")
 
-            # Check for missing expected files
-            missing_files = expected_files - repo_contents
-            if missing_files:
-                missing_files_str = ', '.join(missing_files)
-                return CheckResult.wrong(f"The repository is missing the following expected file(s): {missing_files_str}")
+            jobs = new_workflow.get("jobs")
+            if not jobs:
+                return CheckResult.wrong("The workflow does not have a job.")
 
-            # Check for extra unexpected files
-            extra_files = repo_contents - expected_files
-            if extra_files:
-                extra_files_str = ', '.join(extra_files)
-                return CheckResult.wrong(f"The repository contains unexpected file(s): {extra_files_str}")
+            job_name, job = next(iter(jobs.items()), (None, None))
 
-            # check if the README.md file contains any content, the repository name and content is more than 50 words
-            readme_content = repo.get_contents("README.md").decoded_content.decode()
-            if readme_content == "":
-                return CheckResult.wrong("The README.md file is empty.")
-            if len(readme_content.split()) < 50:
-                return CheckResult.wrong("The project description is too short. A good description is at least 50 words.")
+            if not job or job.get("runs-on") != "ubuntu-latest":
+                return CheckResult.wrong("The job does not run on 'ubuntu-latest' runner or is missing.")
+
+            steps = job.get("steps", [])
+
+            expected_steps = {
+                "checkout_the_repository": "actions/checkout@v",
+                "print_hello_world_using_the_echo_command": "echo"
+            }
+
+            for step_name, expected_value in expected_steps.items():
+                if not any(step.get("run", "").startswith(expected_value) or step.get("uses", "").startswith(expected_value) for step in steps):
+                    return CheckResult.wrong(f"The job does not have a step to {step_name.replace('_', ' ')}.")
+
+            return CheckResult.correct()
+        except GithubException as e:
+            if e.status == 404:
+                return CheckResult.wrong("The .github/workflows directory does not exist or cannot be accessed.")
+            elif e.status == 403:
+                return CheckResult.wrong("Rate limit exceeded. Please try again later or set the GITHUB_TOKEN environment variable.")
+            else:
+                return CheckResult.wrong(
+                    f"An error occurred while accessing the GitHub repository: {e.data.get('message', 'No error message')}")
+        except Exception as e:
+            return CheckResult.wrong(f"Something went wrong. Encountered: {e}")
+
+    @dynamic_test
+    def check_workflow_run_on_push(self):
+        try:
+            latest_workflow_run = list(self.repo.get_workflow_runs().get_page(0))[0]
+            if latest_workflow_run.event != "push":
+                return CheckResult.wrong(f"The latest workflow run was not triggered by a push event.")
+            if latest_workflow_run.conclusion != "success":
+                return CheckResult.wrong(f"The latest workflow run did not succeed.")
             return CheckResult.correct()
 
         except GithubException as e:
             if e.status == 404:
-                return CheckResult.wrong(f"The repository does not exist, is empty, or is private. Encountered  {e.data.get('message', 'No error message')}")
+                return CheckResult.wrong("No workflow runs found or the workflows cannot be accessed.")
             else:
-                return CheckResult.wrong(f"An error occurred while accessing the repository: {e.data.get('message', 'No error message')}")
+                return CheckResult.wrong(
+                    f"An error occurred while accessing the GitHub repository: {e.data.get('message', 'No error message')}")
         except Exception as e:
-            return CheckResult.wrong(f"An unexpected error occurred: {e}")
+            return CheckResult.wrong(f"Something went wrong. Encountered: {e}")
 
 
 if __name__ == '__main__':

@@ -1,5 +1,5 @@
-from test.tests import GitTest
+from test import tests
 
 
 if __name__ == '__main__':
-    GitTest().run_tests()
+    tests.GitTest().run_tests()
