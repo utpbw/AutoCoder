@@ -53,5 +53,5 @@ runs:
         token: ${{ inputs.GITHUB_TOKEN }}
         branch: autocoder-branch-${{ inputs.ISSUE_NUMBER }}
         base: main
-        title: Generated code for issue #${{ inputs.ISSUE_NUMBER }}
+        title: "Generated code for issue #${{ inputs.ISSUE_NUMBER }}"
         labels: autocoder-bot
