@@ -1,0 +1,30 @@
+name: AutoCodeGen
+
+on:
+  issues:
+    types:
+      - opened
+      - reopened
+      - labeled
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate_code:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, 'autocoder-bot')
+    steps:
+      - name: checkout__the_repository
+        uses: actions/checkout@v4
+
+      - name: interact_with_ChatGPT
+        uses: utpbw/AutoCoder@main
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SCRIPT_PATH: scripts/script.sh
+          LABEL: autocoder-bot
