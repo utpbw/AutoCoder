@@ -1,0 +1,1 @@
+# Generated placeholder — set OPENAI_API_KEY secret to enable real code generation
