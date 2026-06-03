@@ -1,4 +1,4 @@
-from test.tests import  GitTest
+from test.tests import GitTest
 
 
 if __name__ == '__main__':
