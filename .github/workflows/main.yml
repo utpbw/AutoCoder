@@ -1,7 +1,11 @@
-name: AutoCoder Workflow
+name: AutoCodeGen
+
 on:
   issues:
-    types: [opened, reopened, labeled]
+    types:
+      - opened
+      - reopened
+      - labeled
 
 permissions:
   contents: write
@@ -12,48 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     if: contains(github.event.issue.labels.*.name, 'autocoder-bot')
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - name: checkout__the_repository
+        uses: actions/checkout@v4
 
-      - name: Make Script Executable
-        run: chmod +x scripts/script.sh
-
-      - name: Run Script
-        env:
+      - name: interact_with_ChatGPT
+        uses: utpbw/AutoCoder@main
+        with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: ./scripts/script.sh ${{ env.GITHUB_TOKEN }} ${{ env.REPOSITORY }} ${{ env.ISSUE_NUMBER }} ${{ env.OPENAI_API_KEY }}
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: autocoder-artifact
-          path: autocoder-bot/
-          if-no-files-found: warn
-
-      - name: Download Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: autocoder-artifact
-          path: autocoder-artifact/
-
-      - name: Display Generated Code
-        run: ls -R autocoder-artifact
-
-      - name: Configure Git
-        run: |
-          git config user.name "autocoder-bot"
-          git config user.email "actions@github.com"
-
-      - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v5
-        with:
-          branch: autocoder-branch-${{ github.event.issue.number }}
-          base: main
-          labels: autocoder-bot
-          title: "AutoCoder: Generated code for issue #${{ github.event.issue.number }}"
-          body: "Auto-generated code from issue #${{ github.event.issue.number }}"
-          author: autocoder-bot <actions@github.com>
-          committer: autocoder-bot <actions@github.com>
+          SCRIPT_PATH: scripts/script.sh
+          LABEL: autocoder-bot
